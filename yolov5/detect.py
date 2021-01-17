@@ -20,6 +20,9 @@ from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 
 import player
+import homography
+homography_list = homography.homography()
+left_clicks = list()
 
 def bbox_rel(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -35,9 +38,40 @@ def bbox_rel(*xyxy):
     
 players = {}
 counter = 0
+template = cv2.imread('../data/template.png', 1)
 
-def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
 
+# def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
+
+#     for i, box in enumerate(bbox):
+#         x1, y1, x2, y2 = [int(i) for i in box]
+#         x1 += offset[0]
+#         x2 += offset[0]
+#         y1 += offset[1]
+#         y2 += offset[1]
+#         id = int(identities[i]) if identities is not None else 0
+#         if id in players.keys():
+#             current_player = players.get(id)
+#             # only if checking colors automatically:
+#             # current_player.assignTeam(players)
+#         else:
+#             # check color manually
+#             team, color = player.check_color_manual2(left_clicks,img,x1,x2,y1,y2)
+
+#             # check color automatically
+#             # color = player.detectPlayerColor(img,x1,x2,y1,y2)
+
+#             current_player = player.Player(id,"Player"+str(id),color=color, x=x2-(x2-x1),y=y2)
+
+#             players[id] = current_player
+            
+#         label = current_player.label
+#         plot_one_box(box, img, label=label, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
+#         #plot_one_box(box, img, label=label, color=current_player.color, line_thickness=1)
+
+#     return img
+
+def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)):
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
@@ -47,44 +81,54 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
         id = int(identities[i]) if identities is not None else 0
         if id in players.keys():
             current_player = players.get(id)
-            #current_player.assignTeam(players)
+            # only if checking colors automatically:
+            current_player.assignTeam(players)
+            current_player.updatePosition(int(x2-((x2-x1)/2)), int(y2-5))
         else:
-            team, color = player.check_color(img,x1,x2,y1,y2)
-            current_player = player.Player(id,"Player"+str(id),color, team=team, x=x2-(x2-x1),y=y2)
+            # check color manually
+            # team, color = player.check_color_manual2(left_clicks,img,x1,x2,y1,y2)
+
+            # check color automatically
+            color = player.detectPlayerColor(img,x1,x2,y1,y2)
+
+            current_player = player.Player(id,"Player"+str(id),color=color, x=int(x2-((x2-x1)/2)),y=int(y2-5))
+
             players[id] = current_player
-            
-        #label = '{}{:d}'.format("", current_player.team)
-        label = current_player.label
-        plot_one_box(box, img, label=label, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
-        #t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
-        #cv2.rectangle(img=img, pt1=(x1, y1), pt2=(x2, y2), color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), thickness=2)
-        #cv2.putText(img, label, (x1, y1), cv2.FONT_HERSHEY_PLAIN, 1, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), thickness=2)
-    return img
+        
+        dst_x, dst_y = player.transformPosition(current_player.x, current_player.y, homography_list[frame])
+        # print("i: " + str(i) + " ----- frame: " + str(frame) + " ----- player: " + str(current_player.id))
+        # cv2.circle(img, (current_player.x,current_player.y), radius=5, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), thickness=-1)
+        cv2.circle(pitch_template, (current_player.x,current_player.y), radius=5, color=current_player.color, thickness=-1)
+        # cv2.circle(pitch_template, (int(dst_x)*1000, int(dst_y)*1000), radius=5, color=current_player.color, thickness=-1)
 
-# def click_color(event,x,y,img):
-#     if event == cv2.EVENT_LBUTTONDOWN:
-#         colors = image[y,x]
-#         return colors
+    # cv2.imshow('pitch', template)
+    # cv2.waitKey(1)
+    # cv2.destroyAllWindows()
+    return img, pitch_template
 
-#     image = cv2.imread(img)
-#     cv2.namedWindow('mouseRGB', cv2.WINDOW_NORMAL)
-#     cv2.resizeWindow('mouseRGB', 960, 640)
-#     cv2.setMouseCallback('mouseRGB',mouseRGB)
-
-#     while(1):
-#         cv2.imshow('mouseRGB',image)
-#         if cv2.waitKey(20) & 0xFF == 27:
-#             break
-#     cv2.destroyAllWindows
+def pick_color(event,x,y,flags,param):
+    if event == cv2.EVENT_LBUTTONDOWN:
+        # colorsB = first_frame[y,x,0]
+        # colorsG = first_frame[y,x,1]
+        # colorsR = first_frame[y,x,2]
+        global left_clicks
+        colors = first_frame[y,x]
+        left_clicks.append(colors)
+        # print("Red: ",colorsR)
+        # print("Green: ",colorsG)
+        # print("Blue: ",colorsB)
+        # print("BRG Format: ",colors)
+        # print("Coordinates of pixel: X: ",x,"Y: ",y)
 
 def detect(save_img=False):
-    source, weights, view_img, save_txt, imgsz = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    save_img, source, weights, view_img, save_txt, imgsz = opt.save_img, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://'))
 
     # Directories
-    save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
-    (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
+    if save_img:
+        save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
+        (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # DeepSort Initialize
     cfg = get_config()
@@ -119,7 +163,7 @@ def detect(save_img=False):
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz)
     else:
-        save_img = True
+        # save_img = True
         dataset = LoadImages(source, img_size=imgsz)
 
     # Get names
@@ -129,8 +173,19 @@ def detect(save_img=False):
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
     _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
 
+    # global first_frame
+    # video = cv2.VideoCapture(source)
+    # status, first_frame = video.read()
+    # cv2.namedWindow('pick_color')
+    # cv2.setMouseCallback('pick_color',pick_color)
+    # while(1):
+    #     cv2.imshow('pick_color',first_frame)
+    #     if cv2.waitKey(20) & 0xFF == 27:
+    #         break
+    # cv2.destroyAllWindows()
+    # print(left_clicks)
+
     for path, img, im0s, vid_cap in dataset:
-        #gray_field = cv2.cvtColor(green_field,cv2.COLOR_BGR2GRAY)
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -155,8 +210,9 @@ def detect(save_img=False):
             else:
                 p, s, im0, frame = Path(path), '', im0s, getattr(dataset, 'frame', 0)
 
-            save_path = str(save_dir / p.name)
-            txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')
+            if save_img:
+                save_path = str(save_dir / p.name)
+                txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             if len(det):
@@ -189,7 +245,8 @@ def detect(save_img=False):
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    draw_boxes(im0, bbox_xyxy, identities)
+                    draw_points(im0, bbox_xyxy, template, frame, identities)
+                    # draw_boxes(im0, bbox_xyxy, identities)
                     
                 
                 for *xyxy, conf, cls in reversed(det):
@@ -225,7 +282,8 @@ def detect(save_img=False):
 
             # Stream results
             if view_img:
-                cv2.imshow(str(p), im0)
+                # cv2.imshow(str(p), im0)
+                cv2.imshow(str(p), template)
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 
@@ -255,7 +313,8 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov5s.pt', help='model.pt path(s)')
+    parser.add_argument('--save-img', action='store_true', help='save results')
+    parser.add_argument('--weights', nargs='+', type=str, default='yolov5l.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='data/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
@@ -273,7 +332,7 @@ if __name__ == '__main__':
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
     opt = parser.parse_args()
-    print(opt)
+    # print(opt)
 
     with torch.no_grad():
         if opt.update:  # update all models (to fix SourceChangeWarning)
