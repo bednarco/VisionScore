@@ -2,8 +2,9 @@ import argparse
 import time
 import os
 from pathlib import Path
-
+import pickle
 import cv2
+import imageio
 import sklearn
 import torch
 import torch.backends.cudnn as cudnn
@@ -19,10 +20,12 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized
 from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 
+from sportsfield_release import field
 import player
-import homography
-homography_list = homography.homography()
-left_clicks = list()
+homograpfy_file = open('../data/homography_list.txt', 'rb')
+homography_list = pickle.load(homograpfy_file)
+
+template_np, template_torch = field.read_template()
 
 def bbox_rel(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -37,9 +40,6 @@ def bbox_rel(*xyxy):
     return x_c, y_c, w, h
     
 players = {}
-counter = 0
-template = cv2.imread('../data/template.png', 1)
-
 
 # def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
 
@@ -95,16 +95,20 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
 
             players[id] = current_player
         
-        dst_x, dst_y = player.transformPosition(current_player.x, current_player.y, homography_list[frame])
+        # dst_x, dst_y = player.transformPosition(current_player.x, current_player.y, homography_list[frame])
+        # print(dst_x, dst_y)
         # print("i: " + str(i) + " ----- frame: " + str(frame) + " ----- player: " + str(current_player.id))
-        # cv2.circle(img, (current_player.x,current_player.y), radius=5, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), thickness=-1)
-        cv2.circle(pitch_template, (current_player.x,current_player.y), radius=5, color=current_player.color, thickness=-1)
+        cv2.circle(img, (current_player.x,current_player.y), radius=5, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), thickness=-1)
+        # cv2.circle(pitch_template, (current_player.x,current_player.y), radius=5, color=current_player.color, thickness=-1)
         # cv2.circle(pitch_template, (int(dst_x)*1000, int(dst_y)*1000), radius=5, color=current_player.color, thickness=-1)
-
+    
+    # template = field.show_field(pitch_template, img, homography_list[frame])
     # cv2.imshow('pitch', template)
+    # top_down = field.show_top_down(pitch_template, img, homography_list[frame])
+    # cv2.imshow('pitch', top_down)
     # cv2.waitKey(1)
     # cv2.destroyAllWindows()
-    return img, pitch_template
+    return img
 
 def pick_color(event,x,y,flags,param):
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -191,7 +195,6 @@ def detect(save_img=False):
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
-
         # Inference
         t1 = time_synchronized()
         pred = model(img, augment=opt.augment)[0]
@@ -203,6 +206,8 @@ def detect(save_img=False):
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
+        
+        # field.detect_lines(im0s)
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -245,7 +250,7 @@ def detect(save_img=False):
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    draw_points(im0, bbox_xyxy, template, frame, identities)
+                    draw_points(im0, bbox_xyxy, template_torch, frame, identities)
                     # draw_boxes(im0, bbox_xyxy, identities)
                     
                 
@@ -256,10 +261,38 @@ def detect(save_img=False):
                         with open(txt_path + '.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
-                    if cls == 32 and (save_img or view_img):  # Add bbox to ball
+                    if  cls == 32 and (save_img or view_img):  # Add bbox to ball
                         #label = f'{names[int(cls)]}'
                         label = 'ball'
                         plot_one_box(xyxy, im0, label=label, color=[0,0,0], line_thickness=2)
+                        # dst_x, dst_y = player.transformPosition(xywh[0]*1000, xywh[1]*1000, homography_list)
+                        # print(dst_x, dst_y)
+                        # cv2.circle(template, (int(dst_x)*5, int(dst_y)*8), radius=3, color=[0,0,0], thickness=-1)
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)
+                    # print("xy: "+ str(xywh[:, :2]))
+                    # tutaj homografia współrzędnych!!!
+                    x = xywh[:,1]
+                    y = xywh[:,0]
+                    xy = torch.stack([x, y, torch.ones_like(x)])
+                    xy_warped = torch.matmul(torch.inverse(homography_list[frame]), xy)
+                    # xy_warped, z_warped = xy_warped.split(2, dim=1)
+                    # xy_warped = 2.0 * xy_warped / (z_warped + 1e-8)
+                    # x_warped, y_warped = torch.unbind(xy_warped, dim=1)
+                    x_np = xy_warped.numpy()[:,1]
+                    y_np = xy_warped.numpy()[:,2]
+                    # print("x: "+str(x_np[0]))
+                    # print("y: "+str(y_np))
+                    # dst = np.dot(torch.inverse(homography_list[frame]), xy)
+                    # dst = cv2.perspectiveTransform(xy, torch.inverse(homography_list[frame]))
+                    # dst_x, dst_y = player.transformPosition(xywh[0], xywh[1], homography_list[frame])
+                    # print("dst_xy: "+ str(dst))
+                    # cv2.circle(template_np, (int(x_np)*255, int(x_np)*255), radius=4, color=[0,0,0], thickness=-1)
+                    top_down = field.show_top_down(template_torch, img, homography_list[frame])
+                    cv2.imshow('pitch', top_down)
+                    cv2.waitKey(1)
+                    cv2.destroyAllWindows()
+
+
 
 
                 # Write MOT compliant results to file
@@ -282,11 +315,14 @@ def detect(save_img=False):
 
             # Stream results
             if view_img:
-                # cv2.imshow(str(p), im0)
-                cv2.imshow(str(p), template)
+                cv2.imshow(str(p), im0)
+
+                # cv2.imshow('template', template_np)
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 
+            # for player in players:
+            #     players[player].showInfo()
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == 'image':

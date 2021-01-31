@@ -19,6 +19,9 @@ class Player:
         self.x = x
         self.y = y
 
+    def showInfo(self):
+        print('id: '+str(self.id)+'  label: '+str(self.label)+'  team: '+str(self.team)+'  x: '+str(self.x)+'  y: '+str(self.y))
+
     def assignTeam(self, players):
         if self.team is None:
             temp_list = []
@@ -88,16 +91,27 @@ class Player:
 
             index_of_smallest = np.where(distances==np.amin(distances))
             smallest_distance = main_colors[index_of_smallest]
-            self.color = smallest_distance.flatten()
-            self.team = 1
+            if np.all(smallest_distance == main_colors[max_value]):
+                self.color = smallest_distance.flatten()
+                self.team = "Team_1"
+                # print(self.color, self.team)
+            elif np.all(smallest_distance == main_colors[med_value]):
+                self.color = smallest_distance.flatten()
+                self.team = "Team_2"
+                # print(self.color, self.team)
+            else:
+                self.color = self.color
+                self.team = "Other"
             # print(type(smallest_distance))
             # print (main_colors[max_value], main_colors[med_value], main_colors[min_value])
 
 def transformPosition(x, y, H):
     pts = np.array([[[x,y]]], np.float32)
+    pts_torch = torch.tensor(pts)
     # pts1 = pts.reshape(-1, 1, 2).astype(np.float32)
     # print(pts1)
-    dst = cv2.perspectiveTransform(pts, np.linalg.inv(H))
+    # dst = cv2.perspectiveTransform(pts, np.linalg.inv(H))
+    dst = cv2.perspectiveTransform(pts, torch.inverse(H))
     return dst[0,0,0], dst[0,0,1]
 
 def k_means(img):
