@@ -26,6 +26,7 @@ homograpfy_file = open('../data/homography_list.txt', 'rb')
 homography_list = pickle.load(homograpfy_file)
 
 template_np, template_torch = field.read_template()
+template = cv2.imread('../data/template.png') 
 
 def bbox_rel(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -83,7 +84,8 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
             current_player = players.get(id)
             # only if checking colors automatically:
             current_player.assignTeam(players)
-            current_player.updatePosition(int(x2-((x2-x1)/2)), int(y2-5))
+            current_player.updatePosition(int(x2-((x2-x1)/2)), int(y2))
+            label = current_player.team
         else:
             # check color manually
             # team, color = player.check_color_manual2(left_clicks,img,x1,x2,y1,y2)
@@ -91,10 +93,13 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
             # check color automatically
             color = player.detectPlayerColor(img,x1,x2,y1,y2)
 
-            current_player = player.Player(id,"Player"+str(id),color=color, x=int(x2-((x2-x1)/2)),y=int(y2-5))
-
+            current_player = player.Player(id, color=color, x=int(x2-((x2-x1)/2)), y=int(y2))
+            # current_player.updatePosition(int(x2-((x2-x1)/2)), int(y2), img.shape[0:2], homography_list[frame])
+            # print(current_player.getWarpedPosition())
+            label = "?"
             players[id] = current_player
 
+        plot_one_box(box, img, label=label, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
         # dst_x, dst_y = player.transformPosition(current_player.x, current_player.y, homography_list[frame])
         # print(dst_x, dst_y)
         # print("i: " + str(i) + " ----- frame: " + str(frame) + " ----- player: " + str(current_player.id))
@@ -102,16 +107,17 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
         # cv2.circle(pitch_template, (current_player.x,current_player.y), radius=5, color=current_player.color, thickness=-1)
         # cv2.circle(pitch_template, (int(dst_x)*1000, int(dst_y)*1000), radius=5, color=current_player.color, thickness=-1)
     # layer = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
-    # player.transformAllPositions(players, homography_list[frame])
-    field.transform(homography_list[frame])
+    player.transformAllPositions(players, img.shape[0:2], homography_list[frame], template_np.shape[0:2])
     # print(np.transpose(np.nonzero(layer)))
     # print(homography_list[frame].cpu().detach().numpy())
     # pitch_template = field.show_top_down(pitch_template, img, homography_list[frame])
-    # # pitch_template = cv2.cvtColor(pitch_template, cv2.COLOR_RGB2BGR)
-    # cv2.imshow('pitch', pitch_template)
-    # # print(img[frame])
-    # if cv2.waitKey(1) == ord('q'):  # q to quit
-    #     raise StopIteration
+    # pitch = field.torch_to_np(pitch_template)
+    # pitch = cv2.cvtColor(pitch, cv2.COLOR_RGB2BGR)
+    player.drawAllPlayers(players, pitch_template)
+    cv2.imshow('pitch', pitch_template)
+    # print(img[frame])
+    if cv2.waitKey(1) == ord('q'):  # q to quit
+        raise StopIteration
     return img
 
 def pick_color(event,x,y,flags,param):
@@ -239,13 +245,14 @@ def detect(save_img=False):
                 for *xyxy, conf, cls in det:
                     if cls == 0:
                         x_c, y_c, bbox_w, bbox_h = bbox_rel(*xyxy)
-                        obj = [x_c, y_c, bbox_w, bbox_h]
-                        bbox_xywh.append(obj)
-                        confs.append([conf.item()])
+                        if player.checkIfOnPitch(x_c, y_c, homography_list[frame], im0.shape[0:2]):
+                            obj = [x_c, y_c, bbox_w, bbox_h]
+                            bbox_xywh.append(obj)
+                            confs.append([conf.item()])
+
 
                 xywhs = torch.Tensor(bbox_xywh)
                 confss = torch.Tensor(confs)
-
                 # Pass detections to deepsort
                 outputs = deepsort.update(xywhs, confss, im0)
 
@@ -253,7 +260,7 @@ def detect(save_img=False):
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    draw_points(im0, bbox_xyxy, template_torch, frame, identities)
+                    draw_points(im0, bbox_xyxy, template, frame, identities)
                     # draw_boxes(im0, bbox_xyxy, identities)
 
                 for *xyxy, conf, cls in reversed(det):
@@ -270,8 +277,8 @@ def detect(save_img=False):
                         # dst_x, dst_y = player.transformPosition(xywh[0]*1000, xywh[1]*1000, homography_list)
                         # print(dst_x, dst_y)
                         # cv2.circle(template, (int(dst_x)*5, int(dst_y)*8), radius=3, color=[0,0,0], thickness=-1)
-                    # xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)
-                    # # print("xy: "+ str(xywh[:, :2]))
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)))
+                    # print(xyxy)
                     # # tutaj homografia współrzędnych!!!
                     # x = xywh[:,1]
                     # y = xywh[:,0]
@@ -318,13 +325,13 @@ def detect(save_img=False):
             # Print time (inference + NMS)
             print(f'{s}Done. ({t2 - t1:.3f}s)')
 
-            pitch_template = field.show_top_down(template_torch, im0, homography_list[frame])
-
+            # pitch_template = field.show_top_down(template_torch, im0, homography_list[frame])
+            # player.drawAllPlayers(players, template_np)
             # Stream results
             if view_img:
                 cv2.imshow(str(p), im0)
                 # pitch = cv2.cvtColor(template_np, cv2.COLOR_RGB2BGR)
-                cv2.imshow("pitch", pitch_template)
+                # cv2.imshow("pitch", template_np)
 
                 # cv2.imshow('template', template_np)
                 if cv2.waitKey(1) == ord('q'):  # q to quit

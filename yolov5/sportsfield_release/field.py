@@ -47,7 +47,7 @@ opt.warp_type = 'homography'
 def read_template():
     template_image_np = imageio.imread(opt.template_path, pilmode='RGB')
     template_image_np = template_image_np / 255.0
-    # template_image_np = image_utils.rgb_template_to_coord_conv_template(template_image_np)
+    template_image_np = image_utils.rgb_template_to_coord_conv_template(template_image_np)
     template_image_torch = utils.np_img_to_torch_img(template_image_np)
     return template_image_np, template_image_torch
 
@@ -70,10 +70,8 @@ def show_top_down(temp, img, h):
     warped_frm = utils.torch_img_to_np_img(warped_frm)+utils.torch_img_to_np_img(template_image_draw)*0.5
     return warped_frm
 
-def transform(h):
-    out = warp.get_four_corners(h, utils.to_torch(utils.FULL_CANON4PTS_NP()))
-    out = out.permute(0, 2, 1)
-    print(out*2)
+def torch_to_np(im):
+    return utils.torch_img_to_np_img(im)
 
 # def show_top_down2(temp, img, h):
 #     H_inv = torch.inverse(h)

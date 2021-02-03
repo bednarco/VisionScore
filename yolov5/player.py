@@ -4,27 +4,37 @@ import torch
 import colorsys
 from sklearn.cluster import KMeans
 from collections import Counter
+from sportsfield_release.utils import utils
 
 class Player:
 
-    def __init__(self,id,label,color=None,team=None,x=None,y=None,positionOnTemplate=None):
+    def __init__(self,id,color=None,team=None,x=None,y=None,positionOnTemplate=None):
         self.id = id
         self.x = x
         self.y = y
-        self.label = label
+        # self.label = label
         self.team = team
         self.color = color
+        # self.normalizedPosition = normalizedPosition
+        # self.warpedPosition = warpedPosition
         self.positionOnTemplate = positionOnTemplate
 
     def updatePosition(self, x, y):
         self.x = x
         self.y = y
+        # x_norm = normalize(x, size[1])
+        # y_norm = normalize(y, size[0])
+        # self.normalizedPosition = np.array([[x_norm/2, y_norm/2]], dtype=np.float32)
+        # self.warpedPosition = perspectiveTransform(self.normalizedPosition, h)
+        # x_dst = denormalize(self.warpedPosition[0], size[1])
+        # y_dst = denormalize(self.warpedPosition[1], size[0])
+        # self.positionOnTemplate = (x_dst, y_dst)
 
     def showInfo(self):
-        print('id: '+str(self.id)+'  label: '+str(self.label)+'  team: '+str(self.team)+'  x: '+str(self.x)+'  y: '+str(self.y))
+        print('id: '+str(self.id)+'  x: '+str(self.x)+'  y: '+str(self.y))
 
-    def getPosition(self):
-        return self.x, self.y
+    def getWarpedPosition(self):
+        return self.warpedPosition
         
     def getColor(self):
         return self.color
@@ -34,8 +44,8 @@ class Player:
 
     def drawPlayerOnPitch(self, img):
         # img[self.y, self.x] = self.color
-        cv2.circle(img, (self.x,self.y) , 8, self.color, -1)
-        # cv2.ellipse(img, (self.x, self.y), (15, 8), 0, 0, 360, (self.color[2],self.color[0],self.color[1]), -1)
+        # cv2.circle(img, (int(self.positionOnTemplate[0]),int(self.positionOnTemplate[0])), 5, self.color, -1)
+        cv2.circle(img, (int(self.positionOnTemplate[0]),int(self.positionOnTemplate[1])), 5, self.color, -1)
         # cv2.ellipse(img, (self.x, self.y), (15, 8), 0, 0, 360, self.color, -1)
 
     def assignTeam(self, players):
@@ -121,6 +131,40 @@ class Player:
             # print(type(smallest_distance))
             # print (main_colors[max_value], main_colors[med_value], main_colors[min_value])
 
+    def transformPosition(self, size_in, h, size_out):
+        x_norm = normalize(self.x, size_in[1])
+        y_norm = normalize(self.y, size_in[0])
+        # print("xy_norm: "+str(x_norm)+"___"+str(y_norm))
+        normalizedPosition = np.array([[x_norm/2, y_norm/2]], dtype=np.float32)
+        # print("normalizedPosition: "+str(normalizedPosition))
+        warpedPosition = perspectiveTransform(normalizedPosition, h)
+        # print("warpedPosition: "+str(warpedPosition))
+        x_dst = denormalize(warpedPosition[0], size_out[1])
+        y_dst = denormalize(warpedPosition[1], size_out[0])
+        # print("xy_dst: "+str(x_dst)+"___"+str(y_dst))
+        self.positionOnTemplate = (x_dst, y_dst)
+
+def checkIfOnPitch(x, y, h, size):
+    x_norm = normalize(x, size[1])
+    y_norm = normalize(y, size[0])
+    normalizedPosition = np.array([[x_norm/2, y_norm/2]], dtype=np.float32)
+    warpedPosition = perspectiveTransform(normalizedPosition, h)
+    return (warpedPosition < 1).all() and (warpedPosition > -1).all()
+
+def perspectiveTransform(pts, homo_mat):
+    pts = utils.to_torch(pts)
+    if homo_mat.shape == (3, 3):
+        homo_mat = homo_mat[None]
+    assert homo_mat.shape[1:] == (3, 3)
+    x, y = pts[:, 0], pts[:, 1]
+    xy = torch.stack([x, y, torch.ones_like(x)])
+    xy_warped = torch.matmul(homo_mat, xy)
+    xy_warped, z_warped = xy_warped.split(2, dim=1)
+    xy_warped = 2 * xy_warped / (z_warped + 1e-8)
+    xy_warped = xy_warped.permute(0, 2, 1)
+    xy_warped = xy_warped.detach().numpy()
+    return xy_warped[0][0]
+
 def drawAllPlayers(playerList, img):
     for player in playerList:
         playerList[player].drawPlayerOnPitch(img)
@@ -129,9 +173,10 @@ def getAllPositions(playerList):
     for player in playerList:
         playerList[player].getPosition()
 
-def transformAllPositions(playerList, h):
+def transformAllPositions(playerList, size_in, h, size_out):
     for player in playerList:
-        playerList[player].transformPosition(h)
+        playerList[player].transformPosition(size_in, h, size_out)
+
 
 def k_means(img):
     clt = KMeans(n_clusters=4)
@@ -159,35 +204,28 @@ def k_means(img):
 #     team3 = main_colors[2]
 
 #     print(team1)
-def perspectiveTransform(homo_mat, pts):
-    # append ones for homogeneous coordinates
-    if homo_mat.shape == (3, 3):
-        homo_mat = homo_mat[None]
-    assert homo_mat.shape[1:] == (3, 3)
-    x, y = pts[:, 0], pts[:, 1]
-    xy = torch.stack([x, y, torch.ones_like(x)])
-    # warp points to model coordinates
-    xy_warped = torch.matmul(homo_mat, xy)  # H.bmm(xy)
-    xy_warped, z_warped = xy_warped.split(2, dim=1)
-    xy_warped = 2 * xy_warped / (z_warped + 1e-8)
-    return xy_warped
 
-out = perspectiveTransform(h, utils.to_torch(np.array(np.array([[-0.5, 0.5], [0.5, 0.5]], dtype=np.float32))))
-out = out.permute(0, 2, 1)
-out = out.detach().numpy()
-left_corner = out[0][0]
-right_corner = out[0][1]
-print(left_corner)
-print(right_corner)
+
+# out = perspectiveTransform(h, utils.to_torch(np.array(np.array([[-0.5, 0.5], [0.5, 0.5]], dtype=np.float32))))
+# out = out.permute(0, 2, 1)
+# out = out.detach().numpy()
+# left_corner = out[0][0]
+# right_corner = out[0][1]
+# print(left_corner)
+# print(right_corner)
+
+def normalize(coord, size):
+    coord = (coord - size/2)/(size/2)
+    return coord
 
 def denormalize(coord, size):
     coord = size/2 + coord*(size/2)
     return coord
     
-print(denormalize2(left_corner[0], outshape[1]))
-print(denormalize2(left_corner[1], outshape[0]))
-print(denormalize2(right_corner[0], outshape[1]))
-print(denormalize2(right_corner[1], outshape[0]))
+# print(denormalize(left_corner[0], outshape[1]))
+# print(denormalize(left_corner[1], outshape[0]))
+# print(denormalize(right_corner[0], outshape[1]))
+# print(denormalize(right_corner[1], outshape[0]))
 
 def detectPlayerColor(img,x1,x2,y1,y2):
     crop = img[y1:y2, x1:x2]
