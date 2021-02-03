@@ -7,13 +7,14 @@ from collections import Counter
 
 class Player:
 
-    def __init__(self,id,label,color=None,team=None,x=None,y=None):
+    def __init__(self,id,label,color=None,team=None,x=None,y=None,positionOnTemplate=None):
         self.id = id
         self.x = x
         self.y = y
         self.label = label
         self.team = team
         self.color = color
+        self.positionOnTemplate = positionOnTemplate
 
     def updatePosition(self, x, y):
         self.x = x
@@ -21,6 +22,21 @@ class Player:
 
     def showInfo(self):
         print('id: '+str(self.id)+'  label: '+str(self.label)+'  team: '+str(self.team)+'  x: '+str(self.x)+'  y: '+str(self.y))
+
+    def getPosition(self):
+        return self.x, self.y
+        
+    def getColor(self):
+        return self.color
+    
+    def getTeam(self):
+        return self.team
+
+    def drawPlayerOnPitch(self, img):
+        # img[self.y, self.x] = self.color
+        cv2.circle(img, (self.x,self.y) , 8, self.color, -1)
+        # cv2.ellipse(img, (self.x, self.y), (15, 8), 0, 0, 360, (self.color[2],self.color[0],self.color[1]), -1)
+        # cv2.ellipse(img, (self.x, self.y), (15, 8), 0, 0, 360, self.color, -1)
 
     def assignTeam(self, players):
         if self.team is None:
@@ -105,14 +121,17 @@ class Player:
             # print(type(smallest_distance))
             # print (main_colors[max_value], main_colors[med_value], main_colors[min_value])
 
-def transformPosition(x, y, H):
-    pts = np.array([[[x,y]]], np.float32)
-    pts_torch = torch.tensor(pts)
-    # pts1 = pts.reshape(-1, 1, 2).astype(np.float32)
-    # print(pts1)
-    # dst = cv2.perspectiveTransform(pts, np.linalg.inv(H))
-    dst = cv2.perspectiveTransform(pts, torch.inverse(H))
-    return dst[0,0,0], dst[0,0,1]
+def drawAllPlayers(playerList, img):
+    for player in playerList:
+        playerList[player].drawPlayerOnPitch(img)
+
+def getAllPositions(playerList):
+    for player in playerList:
+        playerList[player].getPosition()
+
+def transformAllPositions(playerList, h):
+    for player in playerList:
+        playerList[player].transformPosition(h)
 
 def k_means(img):
     clt = KMeans(n_clusters=4)
@@ -140,6 +159,35 @@ def k_means(img):
 #     team3 = main_colors[2]
 
 #     print(team1)
+def perspectiveTransform(homo_mat, pts):
+    # append ones for homogeneous coordinates
+    if homo_mat.shape == (3, 3):
+        homo_mat = homo_mat[None]
+    assert homo_mat.shape[1:] == (3, 3)
+    x, y = pts[:, 0], pts[:, 1]
+    xy = torch.stack([x, y, torch.ones_like(x)])
+    # warp points to model coordinates
+    xy_warped = torch.matmul(homo_mat, xy)  # H.bmm(xy)
+    xy_warped, z_warped = xy_warped.split(2, dim=1)
+    xy_warped = 2 * xy_warped / (z_warped + 1e-8)
+    return xy_warped
+
+out = perspectiveTransform(h, utils.to_torch(np.array(np.array([[-0.5, 0.5], [0.5, 0.5]], dtype=np.float32))))
+out = out.permute(0, 2, 1)
+out = out.detach().numpy()
+left_corner = out[0][0]
+right_corner = out[0][1]
+print(left_corner)
+print(right_corner)
+
+def denormalize(coord, size):
+    coord = size/2 + coord*(size/2)
+    return coord
+    
+print(denormalize2(left_corner[0], outshape[1]))
+print(denormalize2(left_corner[1], outshape[0]))
+print(denormalize2(right_corner[0], outshape[1]))
+print(denormalize2(right_corner[1], outshape[0]))
 
 def detectPlayerColor(img,x1,x2,y1,y2):
     crop = img[y1:y2, x1:x2]

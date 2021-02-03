@@ -63,8 +63,31 @@ def show_field(temp, img, h):
 def show_top_down(temp, img, h):
     H_inv = torch.inverse(h)
     template_image_draw = temp
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     goal_image_draw = img / 255.0
     outshape = template_image_draw.shape[1:3]
     warped_frm = warp.warp_image(utils.np_img_to_torch_img(goal_image_draw)[None], H_inv, out_shape=outshape)[0]
-    warped_frm = utils.torch_img_to_np_img(warped_frm)*0.5+utils.torch_img_to_np_img(template_image_draw)
+    warped_frm = utils.torch_img_to_np_img(warped_frm)+utils.torch_img_to_np_img(template_image_draw)*0.5
     return warped_frm
+
+def transform(h):
+    out = warp.get_four_corners(h, utils.to_torch(utils.FULL_CANON4PTS_NP()))
+    out = out.permute(0, 2, 1)
+    print(out*2)
+
+# def show_top_down2(temp, img, h):
+#     H_inv = torch.inverse(h)
+#     template_image_draw = temp
+#     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+#     goal_image_draw = img / 255.0
+#     outshape = template_image_draw.shape[1:3]
+#     warped_frm = warp.warp_image(utils.np_img_to_torch_img(goal_image_draw)[None], H_inv, out_shape=outshape)[0]
+#     warped_frm = utils.torch_img_to_np_img(warped_frm)
+#     t = utils.torch_img_to_np_img(template_image_draw)
+#     t = cv2.cvtColor(t, cv2.COLOR_RGB2BGR)
+#     # print(cv2.findNonZero(warped_frm))
+#     for point in cv2.findNonZero(warped_frm):
+#         print (point[0])
+#         cv2.circle(t, (point[0][0],point[0][1]), 8, (255,0,0), -1)
+#     # print(np.transpose(np.nonzero(warped_frm)))
+#     return t
