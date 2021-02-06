@@ -15,23 +15,14 @@ class Player:
         # self.label = label
         self.team = team
         self.color = color
-        # self.normalizedPosition = normalizedPosition
-        # self.warpedPosition = warpedPosition
         self.positionOnTemplate = positionOnTemplate
 
     def updatePosition(self, x, y):
         self.x = x
         self.y = y
-        # x_norm = normalize(x, size[1])
-        # y_norm = normalize(y, size[0])
-        # self.normalizedPosition = np.array([[x_norm/2, y_norm/2]], dtype=np.float32)
-        # self.warpedPosition = perspectiveTransform(self.normalizedPosition, h)
-        # x_dst = denormalize(self.warpedPosition[0], size[1])
-        # y_dst = denormalize(self.warpedPosition[1], size[0])
-        # self.positionOnTemplate = (x_dst, y_dst)
 
     def showInfo(self):
-        print('id: '+str(self.id)+'  x: '+str(self.x)+'  y: '+str(self.y))
+        print('id: '+str(self.id)+'  x: '+str(self.x)+'  y: '+str(self.y)+'  xy_dst: '+str(self.positionOnTemplate)+'  team: '+str(self.team)+'  color: '+str(self.color))
 
     def getWarpedPosition(self):
         return self.warpedPosition
@@ -64,7 +55,7 @@ class Player:
             perc = dict(sorted(perc.items()))
 
             main_colors = clt.cluster_centers_
-
+            print (main_colors)
             max_value = max(perc, key=perc.get)
             med_temp = list(sorted(perc.values()))[-2]
             med_value = list(perc.keys())[list(perc.values()).index(med_temp)]
@@ -118,16 +109,17 @@ class Player:
             index_of_smallest = np.where(distances==np.amin(distances))
             smallest_distance = main_colors[index_of_smallest]
             if np.all(smallest_distance == main_colors[max_value]):
-                self.color = smallest_distance.flatten()
+                self.color = np.around(smallest_distance.flatten())
                 self.team = "Team_1"
                 # print(self.color, self.team)
             elif np.all(smallest_distance == main_colors[med_value]):
-                self.color = smallest_distance.flatten()
+                self.color = np.around(smallest_distance.flatten())
                 self.team = "Team_2"
                 # print(self.color, self.team)
             else:
                 self.color = self.color
                 self.team = "Other"
+                # print(self.color, self.team)
             # print(type(smallest_distance))
             # print (main_colors[max_value], main_colors[med_value], main_colors[min_value])
 
@@ -177,7 +169,6 @@ def transformAllPositions(playerList, size_in, h, size_out):
     for player in playerList:
         playerList[player].transformPosition(size_in, h, size_out)
 
-
 def k_means(img):
     clt = KMeans(n_clusters=4)
     clt = clt.fit(img.reshape(-1, 3))
@@ -206,14 +197,6 @@ def k_means(img):
 #     print(team1)
 
 
-# out = perspectiveTransform(h, utils.to_torch(np.array(np.array([[-0.5, 0.5], [0.5, 0.5]], dtype=np.float32))))
-# out = out.permute(0, 2, 1)
-# out = out.detach().numpy()
-# left_corner = out[0][0]
-# right_corner = out[0][1]
-# print(left_corner)
-# print(right_corner)
-
 def normalize(coord, size):
     coord = (coord - size/2)/(size/2)
     return coord
@@ -222,19 +205,19 @@ def denormalize(coord, size):
     coord = size/2 + coord*(size/2)
     return coord
     
-# print(denormalize(left_corner[0], outshape[1]))
-# print(denormalize(left_corner[1], outshape[0]))
-# print(denormalize(right_corner[0], outshape[1]))
-# print(denormalize(right_corner[1], outshape[0]))
-
 def detectPlayerColor(img,x1,x2,y1,y2):
     crop = img[y1:y2, x1:x2]
     height, width, channels = crop.shape
     qrt = crop[int(height/4):int(height/2), int(width/5):int(width/1.25)]
-    
-    perc, colors = k_means(qrt)
+    hsv = cv2.cvtColor(qrt,cv2.COLOR_BGR2HSV)
+    mask_green = cv2.inRange(hsv, (32, 96, 99), (51, 255, 255))
+    ex_green = cv2.bitwise_and(qrt, qrt, mask=mask_green)
+    out = qrt-ex_green
+
+    perc, colors = k_means(out)
     max_value = max(perc, key=perc.get)
-    return colors[max_value]
+    # print(colors[max_value])
+    return np.around(colors[max_value])
 
 def check_color_manual(img,x1,x2,y1,y2):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)

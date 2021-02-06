@@ -42,36 +42,6 @@ def bbox_rel(*xyxy):
     
 players = {}
 
-# def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
-
-#     for i, box in enumerate(bbox):
-#         x1, y1, x2, y2 = [int(i) for i in box]
-#         x1 += offset[0]
-#         x2 += offset[0]
-#         y1 += offset[1]
-#         y2 += offset[1]
-#         id = int(identities[i]) if identities is not None else 0
-#         if id in players.keys():
-#             current_player = players.get(id)
-#             # only if checking colors automatically:
-#             # current_player.assignTeam(players)
-#         else:
-#             # check color manually
-#             team, color = player.check_color_manual2(left_clicks,img,x1,x2,y1,y2)
-
-#             # check color automatically
-#             # color = player.detectPlayerColor(img,x1,x2,y1,y2)
-
-#             current_player = player.Player(id,"Player"+str(id),color=color, x=x2-(x2-x1),y=y2)
-
-#             players[id] = current_player
-            
-#         label = current_player.label
-#         plot_one_box(box, img, label=label, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
-#         #plot_one_box(box, img, label=label, color=current_player.color, line_thickness=1)
-
-#     return img
-
 def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)):
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
@@ -94,12 +64,12 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
             color = player.detectPlayerColor(img,x1,x2,y1,y2)
 
             current_player = player.Player(id, color=color, x=int(x2-((x2-x1)/2)), y=int(y2))
-            # current_player.updatePosition(int(x2-((x2-x1)/2)), int(y2), img.shape[0:2], homography_list[frame])
-            # print(current_player.getWarpedPosition())
+
             label = "?"
             players[id] = current_player
 
-        plot_one_box(box, img, label=label, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
+        # current_player.showInfo()
+        # plot_one_box(box, img, label=label, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
         # dst_x, dst_y = player.transformPosition(current_player.x, current_player.y, homography_list[frame])
         # print(dst_x, dst_y)
         # print("i: " + str(i) + " ----- frame: " + str(frame) + " ----- player: " + str(current_player.id))
@@ -107,18 +77,19 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
         # cv2.circle(pitch_template, (current_player.x,current_player.y), radius=5, color=current_player.color, thickness=-1)
         # cv2.circle(pitch_template, (int(dst_x)*1000, int(dst_y)*1000), radius=5, color=current_player.color, thickness=-1)
     # layer = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
-    player.transformAllPositions(players, img.shape[0:2], homography_list[frame], template_np.shape[0:2])
+    player.transformAllPositions(players, img.shape[0:2], homography_list[frame-1], template_np.shape[0:2])
     # print(np.transpose(np.nonzero(layer)))
     # print(homography_list[frame].cpu().detach().numpy())
     # pitch_template = field.show_top_down(pitch_template, img, homography_list[frame])
     # pitch = field.torch_to_np(pitch_template)
     # pitch = cv2.cvtColor(pitch, cv2.COLOR_RGB2BGR)
+    
     player.drawAllPlayers(players, pitch_template)
-    cv2.imshow('pitch', pitch_template)
-    # print(img[frame])
-    if cv2.waitKey(1) == ord('q'):  # q to quit
-        raise StopIteration
-    return img
+    # cv2.imshow('pitch', pitch_template)
+    # # print(img[frame])
+    # if cv2.waitKey(1) == ord('q'):  # q to quit
+    #     raise StopIteration
+    return img, pitch_template
 
 def pick_color(event,x,y,flags,param):
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -216,7 +187,7 @@ def detect(save_img=False):
         # Apply Classifier
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
-        
+        pitch = template.copy()
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -245,7 +216,7 @@ def detect(save_img=False):
                 for *xyxy, conf, cls in det:
                     if cls == 0:
                         x_c, y_c, bbox_w, bbox_h = bbox_rel(*xyxy)
-                        if player.checkIfOnPitch(x_c, y_c, homography_list[frame], im0.shape[0:2]):
+                        if player.checkIfOnPitch(x_c, y_c, homography_list[frame-1], im0.shape[0:2]):
                             obj = [x_c, y_c, bbox_w, bbox_h]
                             bbox_xywh.append(obj)
                             confs.append([conf.item()])
@@ -260,7 +231,8 @@ def detect(save_img=False):
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
                     identities = outputs[:, -1]
-                    draw_points(im0, bbox_xyxy, template, frame, identities)
+                    
+                    draw_points(im0, bbox_xyxy, pitch, frame, identities)
                     # draw_boxes(im0, bbox_xyxy, identities)
 
                 for *xyxy, conf, cls in reversed(det):
@@ -329,9 +301,9 @@ def detect(save_img=False):
             # player.drawAllPlayers(players, template_np)
             # Stream results
             if view_img:
-                cv2.imshow(str(p), im0)
+                cv2.imshow(str(p), cv2.resize(im0, (int(im0.shape[1]/3), int(im0.shape[0]/3))))
                 # pitch = cv2.cvtColor(template_np, cv2.COLOR_RGB2BGR)
-                # cv2.imshow("pitch", template_np)
+                cv2.imshow('pitch', pitch)
 
                 # cv2.imshow('template', template_np)
                 if cv2.waitKey(1) == ord('q'):  # q to quit
@@ -357,7 +329,7 @@ def detect(save_img=False):
             #     cv2.circle(layer, (x,y), radius=5, color=color, thickness=-1)
 
             # layer = layer*0.5+im0
-            # cv2.imshow('pitch', layer)
+            # cv2.imshow('pitch', pitch)
             # cv2.waitKey(1)
             # Save results (image with detections)
             if save_img:
@@ -371,10 +343,12 @@ def detect(save_img=False):
 
                         fourcc = 'mp4v'  # output video codec
                         fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        # w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        # h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        w = int(pitch.shape[0])
+                        h = int(pitch.shape[1])
                         vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
-                    vid_writer.write(im0)
+                    vid_writer.write(pitch)
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
