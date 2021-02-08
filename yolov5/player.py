@@ -8,11 +8,11 @@ from sportsfield_release.utils import utils
 
 class Player:
 
-    def __init__(self,id,color=None,team=None,x=None,y=None,positionOnTemplate=None):
+    def __init__(self,id,isVisible,color=None,team=None,x=None,y=None,positionOnTemplate=None):
         self.id = id
+        self.isVisible = isVisible
         self.x = x
         self.y = y
-        # self.label = label
         self.team = team
         self.color = color
         self.positionOnTemplate = positionOnTemplate
@@ -20,6 +20,7 @@ class Player:
     def updatePosition(self, x, y):
         self.x = x
         self.y = y
+        self.isVisible = True
 
     def showInfo(self):
         print('id: '+str(self.id)+'  x: '+str(self.x)+'  y: '+str(self.y)+'  xy_dst: '+str(self.positionOnTemplate)+'  team: '+str(self.team)+'  color: '+str(self.color))
@@ -38,6 +39,8 @@ class Player:
         # cv2.circle(img, (int(self.positionOnTemplate[0]),int(self.positionOnTemplate[0])), 5, self.color, -1)
         cv2.circle(img, (int(self.positionOnTemplate[0]),int(self.positionOnTemplate[1])), 5, self.color, -1)
         # cv2.ellipse(img, (self.x, self.y), (15, 8), 0, 0, 360, self.color, -1)
+        self.isVisible = False
+
 
     def assignTeam(self, players):
         if self.team is None:
@@ -55,7 +58,7 @@ class Player:
             perc = dict(sorted(perc.items()))
 
             main_colors = clt.cluster_centers_
-            print (main_colors)
+            # print (main_colors)
             max_value = max(perc, key=perc.get)
             med_temp = list(sorted(perc.values()))[-2]
             med_value = list(perc.keys())[list(perc.values()).index(med_temp)]
@@ -159,7 +162,8 @@ def perspectiveTransform(pts, homo_mat):
 
 def drawAllPlayers(playerList, img):
     for player in playerList:
-        playerList[player].drawPlayerOnPitch(img)
+        if playerList[player].isVisible == True:
+            playerList[player].drawPlayerOnPitch(img)
 
 def getAllPositions(playerList):
     for player in playerList:

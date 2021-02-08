@@ -10,6 +10,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
 from numpy import random
+import io
 
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
@@ -22,8 +23,18 @@ from deep_sort_pytorch.deep_sort import DeepSort
 
 from sportsfield_release import field
 import player
-homograpfy_file = open('../data/homography_list.txt', 'rb')
-homography_list = pickle.load(homograpfy_file)
+
+class CPU_Unpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+        else: return super().find_class(module, name)
+
+#contents = pickle.load(f) becomes...
+# contents = CPU_Unpickler(f).load()
+homograpfy_file = open('../data/homography_list_2.txt', 'rb')
+homography_list = CPU_Unpickler(homograpfy_file).load()
+# homography_list = torch.load('../data/homography_list_2.txt', map_location=torch.device('cpu'))
 
 template_np, template_torch = field.read_template()
 template = cv2.imread('../data/template.png') 
@@ -63,7 +74,7 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
             # check color automatically
             color = player.detectPlayerColor(img,x1,x2,y1,y2)
 
-            current_player = player.Player(id, color=color, x=int(x2-((x2-x1)/2)), y=int(y2))
+            current_player = player.Player(id, isVisible=True, color=color, x=int(x2-((x2-x1)/2)), y=int(y2))
 
             label = "?"
             players[id] = current_player
@@ -171,184 +182,188 @@ def detect(save_img=False):
     # print(left_clicks)
 
     for path, img, im0s, vid_cap in dataset:
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
-        # Inference
-        t1 = time_synchronized()
-        pred = model(img, augment=opt.augment)[0]
+        # if frame % 3 == 0:
+            frame = getattr(dataset, 'frame', 0)
+            img = torch.from_numpy(img).to(device)
+            img = img.half() if half else img.float()  # uint8 to fp16/32
+            img /= 255.0  # 0 - 255 to 0.0 - 1.0
+            if img.ndimension() == 3:
+                img = img.unsqueeze(0)
+            # Inference
+            t1 = time_synchronized()
+            pred = model(img, augment=opt.augment)[0]
 
-        # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
-        t2 = time_synchronized()
+            # Apply NMS
+            pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+            t2 = time_synchronized()
 
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
-        pitch = template.copy()
-        # Process detections
-        for i, det in enumerate(pred):  # detections per image
-            if webcam:  # batch_size >= 1
-                p, s, im0, frame = Path(path[i]), '%g: ' % i, im0s[i].copy(), dataset.count
-            else:
-                p, s, im0, frame = Path(path), '', im0s, getattr(dataset, 'frame', 0)
+            # Apply Classifier
+            if classify:
+                pred = apply_classifier(pred, modelc, img, im0s)
+            pitch = template.copy()
+            # Process detections
+            for i, det in enumerate(pred):  # detections per image
+                if webcam:  # batch_size >= 1
+                    p, s, im0, frame = Path(path[i]), '%g: ' % i, im0s[i].copy(), dataset.count
+                else:
+                    p, s, im0, frame = Path(path), '', im0s, getattr(dataset, 'frame', 0)
 
-            if save_img:
-                save_path = str(save_dir / p.name)
-                txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')
-            s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            if len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                if save_img:
+                    save_path = str(save_dir / p.name)
+                    txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')
+                s += '%gx%g ' % img.shape[2:]  # print string
+                gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+                if len(det):
+                    # Rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += f'{n} {names[int(c)]}s, '  # add to string
+                    # Print results
+                    for c in det[:, -1].unique():
+                        n = (det[:, -1] == c).sum()  # detections per class
+                        s += f'{n} {names[int(c)]}s, '  # add to string
 
-                bbox_xywh = []
-                confs = []
+                    bbox_xywh = []
+                    confs = []
 
-                # Adapt detections to deep sort input format
-                for *xyxy, conf, cls in det:
-                    if cls == 0:
-                        x_c, y_c, bbox_w, bbox_h = bbox_rel(*xyxy)
-                        if player.checkIfOnPitch(x_c, y_c, homography_list[frame-1], im0.shape[0:2]):
-                            obj = [x_c, y_c, bbox_w, bbox_h]
-                            bbox_xywh.append(obj)
-                            confs.append([conf.item()])
+                    # Adapt detections to deep sort input format
+                    for *xyxy, conf, cls in det:
+                        if cls == 0:
+                            x_c, y_c, bbox_w, bbox_h = bbox_rel(*xyxy)
+                            if player.checkIfOnPitch(x_c, y_c, homography_list[frame-1], im0.shape[0:2]):
+                                obj = [x_c, y_c, bbox_w, bbox_h]
+                                bbox_xywh.append(obj)
+                                confs.append([conf.item()])
 
 
-                xywhs = torch.Tensor(bbox_xywh)
-                confss = torch.Tensor(confs)
-                # Pass detections to deepsort
-                outputs = deepsort.update(xywhs, confss, im0)
+                    xywhs = torch.Tensor(bbox_xywh)
+                    confss = torch.Tensor(confs)
+                    # Pass detections to deepsort
+                    outputs = deepsort.update(xywhs, confss, im0)
 
-                # draw boxes for visualization
-                if len(outputs) > 0:
-                    bbox_xyxy = outputs[:, :4]
-                    identities = outputs[:, -1]
+                    # draw boxes for visualization
+                    if len(outputs) > 0:
+                        bbox_xyxy = outputs[:, :4]
+                        identities = outputs[:, -1]
+                        
+                        draw_points(im0, bbox_xyxy, pitch, frame, identities)
+                        # draw_boxes(im0, bbox_xyxy, identities)
+
+                    for *xyxy, conf, cls in reversed(det):
+                        if save_txt:  # Write to file
+                            xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                            line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
+                            with open(txt_path + '.txt', 'a') as f:
+                                f.write(('%g ' * len(line)).rstrip() % line + '\n')
+
+                        if  cls == 32 and (save_img or view_img):  # Add bbox to ball
+                            #label = f'{names[int(cls)]}'
+                            label = 'ball'
+                            plot_one_box(xyxy, im0, label=label, color=[0,0,0], line_thickness=2)
+                            # dst_x, dst_y = player.transformPosition(xywh[0]*1000, xywh[1]*1000, homography_list)
+                            # print(dst_x, dst_y)
+                            # cv2.circle(template, (int(dst_x)*5, int(dst_y)*8), radius=3, color=[0,0,0], thickness=-1)
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)))
+                        # print(xyxy)
+                        # # tutaj homografia współrzędnych!!!
+                        # x = xywh[:,1]
+                        # y = xywh[:,0]
+                        
+                        # print(x,y)
+
+                        # xy = torch.stack([x, y, torch.ones_like(x)])
+                        # xy_warped = torch.matmul(torch.inverse(homography_list[frame]), xy)
+
+                        # xy_warped, z_warped = xy_warped.split(2, dim=1)
+
+                        # xy_warped, z_warped = xy_warped.split(2, dim=1)
+                        # xy_warped = 2.0 * xy_warped / (z_warped + 1e-8)
+                        # x_warped, y_warped = torch.unbind(xy_warped, dim=1)
+                        # print(x_warped.squeeze(0).squeeze(0).numpy(), y_warped.squeeze(0).squeeze(0).numpy())
+                        # out_shape = template_torch.shape[1:3]
+                        # print(x_warped.view(*out_shape[-2:]))
+                        # x_np = x_warped.squeeze(0).squeeze(0).numpy()
+                        # y_np = y_warped.squeeze(0).squeeze(0).numpy()
+                        # print("x: "+str(x_np[0][0]))
+                        # print("y: "+str(y_np[0][0]))
+                        # dst = np.dot(torch.inverse(homography_list[frame]), xy)
+                        # dst = cv2.perspectiveTransform(xy, torch.inverse(homography_list[frame]))
+                        # dst_x, dst_y = player.transformPosition(xywh[0], xywh[1], homography_list[frame])
+                        # print("dst_xy: "+ str(dst))
+                        # cv2.circle(template_np, (int(x_np), int(x_np)), radius=4, color=[0,0,0], thickness=-1)
+
+                    # Write MOT compliant results to file
+                    """ if save_txt and len(outputs) != 0:
+                        for j, output in enumerate(outputs):
+                            bbox_left = output[0]
+                            bbox_top = output[1]
+                            bbox_w = output[2]
+                            bbox_h = output[3]
+                            identity = output[-1]
+                            with open(txt_path + '.txt', 'a') as f:
+                                f.write(('%g ' * 10 + '\n') % (j, identity, bbox_left,
+                                                            bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))  # label format """
                     
-                    draw_points(im0, bbox_xyxy, pitch, frame, identities)
-                    # draw_boxes(im0, bbox_xyxy, identities)
-
-                for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
-
-                    if  cls == 32 and (save_img or view_img):  # Add bbox to ball
-                        #label = f'{names[int(cls)]}'
-                        label = 'ball'
-                        plot_one_box(xyxy, im0, label=label, color=[0,0,0], line_thickness=2)
-                        # dst_x, dst_y = player.transformPosition(xywh[0]*1000, xywh[1]*1000, homography_list)
-                        # print(dst_x, dst_y)
-                        # cv2.circle(template, (int(dst_x)*5, int(dst_y)*8), radius=3, color=[0,0,0], thickness=-1)
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)))
-                    # print(xyxy)
-                    # # tutaj homografia współrzędnych!!!
-                    # x = xywh[:,1]
-                    # y = xywh[:,0]
                     
-                    # print(x,y)
+                else:
+                    deepsort.increment_ages()
 
-                    # xy = torch.stack([x, y, torch.ones_like(x)])
-                    # xy_warped = torch.matmul(torch.inverse(homography_list[frame]), xy)
+                # Print time (inference + NMS)
+                print(f'{s}Done. ({t2 - t1:.3f}s)')
 
-                    # xy_warped, z_warped = xy_warped.split(2, dim=1)
+                # pitch_template = field.show_top_down(template_torch, im0, homography_list[frame])
+                # player.drawAllPlayers(players, template_np)
+                # Stream results
+                if view_img:
+                    cv2.imshow(str(p), cv2.resize(im0, (int(im0.shape[1]/3), int(im0.shape[0]/3))))
+                    # pitch = cv2.cvtColor(template_np, cv2.COLOR_RGB2BGR)
+                    cv2.imshow('pitch', pitch)
 
-                    # xy_warped, z_warped = xy_warped.split(2, dim=1)
-                    # xy_warped = 2.0 * xy_warped / (z_warped + 1e-8)
-                    # x_warped, y_warped = torch.unbind(xy_warped, dim=1)
-                    # print(x_warped.squeeze(0).squeeze(0).numpy(), y_warped.squeeze(0).squeeze(0).numpy())
-                    # out_shape = template_torch.shape[1:3]
-                    # print(x_warped.view(*out_shape[-2:]))
-                    # x_np = x_warped.squeeze(0).squeeze(0).numpy()
-                    # y_np = y_warped.squeeze(0).squeeze(0).numpy()
-                    # print("x: "+str(x_np[0][0]))
-                    # print("y: "+str(y_np[0][0]))
-                    # dst = np.dot(torch.inverse(homography_list[frame]), xy)
-                    # dst = cv2.perspectiveTransform(xy, torch.inverse(homography_list[frame]))
-                    # dst_x, dst_y = player.transformPosition(xywh[0], xywh[1], homography_list[frame])
-                    # print("dst_xy: "+ str(dst))
-                    # cv2.circle(template_np, (int(x_np), int(x_np)), radius=4, color=[0,0,0], thickness=-1)
-
-                # Write MOT compliant results to file
-                """ if save_txt and len(outputs) != 0:
-                    for j, output in enumerate(outputs):
-                        bbox_left = output[0]
-                        bbox_top = output[1]
-                        bbox_w = output[2]
-                        bbox_h = output[3]
-                        identity = output[-1]
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * 10 + '\n') % (j, identity, bbox_left,
-                                                           bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))  # label format """
+                    # cv2.imshow('template', template_np)
+                    if cv2.waitKey(1) == ord('q'):  # q to quit
+                        raise StopIteration
                 
+                # layer = np.zeros((im0.shape[0], im0.shape[1], 3))
+
+                # for player in players:
+                #     x, y = players[player].getPosition()
+                #     color = players[player].getColor()
+                    # cv2.circle(template_np,(int(dst[0].item()),int(dst[1].item())) , 8, (50,255,0), -1)
+                    # cv2.circle(layer, (x,y), radius=5, color=color, thickness=-1)
+                    # print ("x: "+str(x)+ " y: "+str(y)+ " color: "+ str(color)+ " layer: "+str(layer))
                 
-            else:
-                deepsort.increment_ages()
+                # top_down = field.show_top_down(template_torch, im0, homography_list[frame])
+                # layer = field.show_field(template_torch, im0, homography_list[frame])
+                # layer = cv2.cvtColor(layer, cv2.COLOR_RGB2BGR)
+                # for player in players:
+                #     x, y = players[player].getPosition()
+                #     team = players[player].getTeam()
+                #     print(team)
+                #     color = players[player].getColor()
+                #     cv2.circle(layer, (x,y), radius=5, color=color, thickness=-1)
 
-            # Print time (inference + NMS)
-            print(f'{s}Done. ({t2 - t1:.3f}s)')
+                # layer = layer*0.5+im0
+                # cv2.imshow('pitch', pitch)
+                # cv2.waitKey(1)
+                # Save results (image with detections)
+                if save_img:
+                    if dataset.mode == 'image':
+                        cv2.imwrite(save_path, im0)
+                    else:  # 'video'
+                        if vid_path != save_path:  # new video
+                            vid_path = save_path
+                            if isinstance(vid_writer, cv2.VideoWriter):
+                                vid_writer.release()  # release previous video writer
 
-            # pitch_template = field.show_top_down(template_torch, im0, homography_list[frame])
-            # player.drawAllPlayers(players, template_np)
-            # Stream results
-            if view_img:
-                cv2.imshow(str(p), cv2.resize(im0, (int(im0.shape[1]/3), int(im0.shape[0]/3))))
-                # pitch = cv2.cvtColor(template_np, cv2.COLOR_RGB2BGR)
-                cv2.imshow('pitch', pitch)
-
-                # cv2.imshow('template', template_np)
-                if cv2.waitKey(1) == ord('q'):  # q to quit
-                    raise StopIteration
-            
-            # layer = np.zeros((im0.shape[0], im0.shape[1], 3))
-
-            # for player in players:
-            #     x, y = players[player].getPosition()
-            #     color = players[player].getColor()
-                # cv2.circle(template_np,(int(dst[0].item()),int(dst[1].item())) , 8, (50,255,0), -1)
-                # cv2.circle(layer, (x,y), radius=5, color=color, thickness=-1)
-                # print ("x: "+str(x)+ " y: "+str(y)+ " color: "+ str(color)+ " layer: "+str(layer))
-            
-            # top_down = field.show_top_down(template_torch, im0, homography_list[frame])
-            # layer = field.show_field(template_torch, im0, homography_list[frame])
-            # layer = cv2.cvtColor(layer, cv2.COLOR_RGB2BGR)
-            # for player in players:
-            #     x, y = players[player].getPosition()
-            #     team = players[player].getTeam()
-            #     print(team)
-            #     color = players[player].getColor()
-            #     cv2.circle(layer, (x,y), radius=5, color=color, thickness=-1)
-
-            # layer = layer*0.5+im0
-            # cv2.imshow('pitch', pitch)
-            # cv2.waitKey(1)
-            # Save results (image with detections)
-            if save_img:
-                if dataset.mode == 'image':
-                    cv2.imwrite(save_path, im0)
-                else:  # 'video'
-                    if vid_path != save_path:  # new video
-                        vid_path = save_path
-                        if isinstance(vid_writer, cv2.VideoWriter):
-                            vid_writer.release()  # release previous video writer
-
-                        fourcc = 'mp4v'  # output video codec
-                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                        # w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        # h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        w = int(pitch.shape[0])
-                        h = int(pitch.shape[1])
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
-                    vid_writer.write(pitch)
+                            # fourcc = 'mp4v'  # output video codec
+                            # fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                            # w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            # h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            fourcc = 'XVID'
+                            fps = 20.0
+                            w = int(pitch.shape[1])
+                            h = int(pitch.shape[0])
+                            vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
+                        vid_writer.write(pitch)
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
