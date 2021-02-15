@@ -32,9 +32,6 @@ class CPU_Unpickler(pickle.Unpickler):
 
 #contents = pickle.load(f) becomes...
 # contents = CPU_Unpickler(f).load()
-homograpfy_file = open('../data/homography_list_2.txt', 'rb')
-homography_list = CPU_Unpickler(homograpfy_file).load()
-# homography_list = torch.load('../data/homography_list_2.txt', map_location=torch.device('cpu'))
 
 template_np, template_torch = field.read_template()
 template = cv2.imread('../data/template.png') 
@@ -53,7 +50,7 @@ def bbox_rel(*xyxy):
     
 players = {}
 
-def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)):
+def draw_points(img, bbox, pitch_template, h_frame, identities=None, offset=(0, 0)):
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
@@ -63,10 +60,11 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
         id = int(identities[i]) if identities is not None else 0
         if id in players.keys():
             current_player = players.get(id)
-            # only if checking colors automatically:
-            current_player.assignTeam(players)
+            if len(players) >= 3:              
+                player.detectMainColors(players)
+                current_player.assignTeam(players)
+                # label = current_player.team
             current_player.updatePosition(int(x2-((x2-x1)/2)), int(y2))
-            label = current_player.team
         else:
             # check color manually
             # team, color = player.check_color_manual2(left_clicks,img,x1,x2,y1,y2)
@@ -76,19 +74,18 @@ def draw_points(img, bbox, pitch_template, frame, identities=None, offset=(0, 0)
 
             current_player = player.Player(id, isVisible=True, color=color, x=int(x2-((x2-x1)/2)), y=int(y2))
 
-            label = "?"
+            # label = "?"
             players[id] = current_player
 
         # current_player.showInfo()
-        # plot_one_box(box, img, label=label, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
-        # dst_x, dst_y = player.transformPosition(current_player.x, current_player.y, homography_list[frame])
-        # print(dst_x, dst_y)
+        plot_one_box(box, img, label=str(current_player.id), color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
+        # print(current_player.color)
         # print("i: " + str(i) + " ----- frame: " + str(frame) + " ----- player: " + str(current_player.id))
         # cv2.circle(layer, (current_player.x,current_player.y), radius=5, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), thickness=-1)
         # cv2.circle(pitch_template, (current_player.x,current_player.y), radius=5, color=current_player.color, thickness=-1)
         # cv2.circle(pitch_template, (int(dst_x)*1000, int(dst_y)*1000), radius=5, color=current_player.color, thickness=-1)
     # layer = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
-    player.transformAllPositions(players, img.shape[0:2], homography_list[frame-1], template_np.shape[0:2])
+    player.transformAllPositions(players, img.shape[0:2], h_frame, template_np.shape[0:2])
     # print(np.transpose(np.nonzero(layer)))
     # print(homography_list[frame].cpu().detach().numpy())
     # pitch_template = field.show_top_down(pitch_template, img, homography_list[frame])
@@ -117,9 +114,12 @@ def pick_color(event,x,y,flags,param):
         # print("Coordinates of pixel: X: ",x,"Y: ",y)
 
 def detect(save_img=False):
-    save_img, source, weights, view_img, save_txt, imgsz = opt.save_img, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    save_img, source, weights, view_img, save_txt, imgsz, homography = opt.save_img, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, opt.homography_file
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://'))
+
+    homograpfy_file = open(homography, 'rb')
+    homography_list = CPU_Unpickler(homograpfy_file).load()
 
     # Directories
     if save_img:
@@ -181,9 +181,8 @@ def detect(save_img=False):
     # cv2.destroyAllWindows()
     # print(left_clicks)
 
-    for path, img, im0s, vid_cap in dataset:
-        # if frame % 3 == 0:
-            frame = getattr(dataset, 'frame', 0)
+    for path, img, im0s, vid_cap, frame in dataset:
+        # if frame > 50:
             img = torch.from_numpy(img).to(device)
             img = img.half() if half else img.float()  # uint8 to fp16/32
             img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -213,7 +212,7 @@ def detect(save_img=False):
                     txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')
                 s += '%gx%g ' % img.shape[2:]  # print string
                 gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-                if len(det):
+                if len(det) >= 3:
                     # Rescale boxes from img_size to im0 size
                     det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
@@ -244,8 +243,7 @@ def detect(save_img=False):
                     if len(outputs) > 0:
                         bbox_xyxy = outputs[:, :4]
                         identities = outputs[:, -1]
-                        
-                        draw_points(im0, bbox_xyxy, pitch, frame, identities)
+                        draw_points(im0, bbox_xyxy, pitch, homography_list[frame-1], identities)
                         # draw_boxes(im0, bbox_xyxy, identities)
 
                     for *xyxy, conf, cls in reversed(det):
@@ -259,12 +257,19 @@ def detect(save_img=False):
                             #label = f'{names[int(cls)]}'
                             label = 'ball'
                             plot_one_box(xyxy, im0, label=label, color=[0,0,0], line_thickness=2)
+                            xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()
+                            x_norm = player.normalize(xywh[0], im0.shape[0:2][1])
+                            y_norm = player.normalize(xywh[1], im0.shape[0:2][0])
+                            normalizedPosition = np.array([[x_norm/2, y_norm/2]], dtype=np.float32)
+                            warpedPosition = player.perspectiveTransform(normalizedPosition, homography_list[frame-1])
+                            x_dst = player.denormalize(warpedPosition[0], template_np.shape[0:2][1])
+                            y_dst = player.denormalize(warpedPosition[1], template_np.shape[0:2][0])
+                            positionOnTemplate = (x_dst, y_dst)
+                            cv2.circle(pitch, (int(positionOnTemplate[0]),int(positionOnTemplate[1])), 5, (255,255,255), -1)
                             # dst_x, dst_y = player.transformPosition(xywh[0]*1000, xywh[1]*1000, homography_list)
                             # print(dst_x, dst_y)
                             # cv2.circle(template, (int(dst_x)*5, int(dst_y)*8), radius=3, color=[0,0,0], thickness=-1)
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)))
                         # print(xyxy)
-                        # # tutaj homografia współrzędnych!!!
                         # x = xywh[:,1]
                         # y = xywh[:,0]
                         
@@ -314,7 +319,8 @@ def detect(save_img=False):
                 # player.drawAllPlayers(players, template_np)
                 # Stream results
                 if view_img:
-                    cv2.imshow(str(p), cv2.resize(im0, (int(im0.shape[1]/3), int(im0.shape[0]/3))))
+                    cv2.imshow(str(p), im0)
+                    # cv2.imshow(str(p), cv2.resize(im0, (int(im0.shape[1]/3), int(im0.shape[0]/3))))
                     # pitch = cv2.cvtColor(template_np, cv2.COLOR_RGB2BGR)
                     cv2.imshow('pitch', pitch)
 
@@ -334,15 +340,14 @@ def detect(save_img=False):
                 # top_down = field.show_top_down(template_torch, im0, homography_list[frame])
                 # layer = field.show_field(template_torch, im0, homography_list[frame])
                 # layer = cv2.cvtColor(layer, cv2.COLOR_RGB2BGR)
-                # for player in players:
-                #     x, y = players[player].getPosition()
-                #     team = players[player].getTeam()
-                #     print(team)
-                #     color = players[player].getColor()
-                #     cv2.circle(layer, (x,y), radius=5, color=color, thickness=-1)
+                # for player_id in players:
+                #     x, y = players[player_id].getPosition()
+                #     cv2.circle(layer, (x,y), radius=5, color=(255,255,255), thickness=-1)
 
                 # layer = layer*0.5+im0
-                # cv2.imshow('pitch', pitch)
+                # cv2.imshow('layer', cv2.resize(layer, (int(layer.shape[1]/2), int(layer.shape[0]/2))))
+                # cv2.waitKey(1)
+                # cv2.imshow('top-down', top_down)
                 # cv2.waitKey(1)
                 # Save results (image with detections)
                 if save_img:
@@ -353,17 +358,19 @@ def detect(save_img=False):
                             vid_path = save_path
                             if isinstance(vid_writer, cv2.VideoWriter):
                                 vid_writer.release()  # release previous video writer
-
-                            # fourcc = 'mp4v'  # output video codec
-                            # fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                            # w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            # h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                            fourcc = 'XVID'
-                            fps = 20.0
-                            w = int(pitch.shape[1])
-                            h = int(pitch.shape[0])
+                            fourcc = 'mp4v'  # output video codec
+                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                             vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
-                        vid_writer.write(pitch)
+                            vid_writer2 = cv2.VideoWriter(str(save_dir / 'pitch.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), vid_cap.get(cv2.CAP_PROP_FPS), (int(pitch.shape[1]), int(pitch.shape[0])))
+                            # vid_writer3 = cv2.VideoWriter(str(save_dir / 'layer.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), vid_cap.get(cv2.CAP_PROP_FPS), (int(layer.shape[1]), int(layer.shape[0])))
+                            # vid_writer4 = cv2.VideoWriter(str(save_dir / 'warped.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), vid_cap.get(cv2.CAP_PROP_FPS), (int(top_down.shape[1]), int(top_down.shape[0])))
+                        vid_writer.write(im0)
+                        vid_writer2.write(pitch)
+                        # vid_writer3.write(layer)
+                        # vid_writer4.write(top_down)
+
 
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
@@ -392,6 +399,7 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='exp', help='save results to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument("--config_deepsort", type=str, default="deep_sort_pytorch/configs/deep_sort.yaml")
+    parser.add_argument("--homography-file", type=str, default="../data")
     opt = parser.parse_args()
     # print(opt)
 
