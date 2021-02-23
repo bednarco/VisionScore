@@ -53,6 +53,7 @@ def read_template():
 
 def show_field(temp, img, h):
     template_image_draw = temp
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     goal_image_draw = img / 255.0
     outshape = goal_image_draw.shape[0:2]    
     optim_homography = h

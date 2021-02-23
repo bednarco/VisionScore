@@ -30,8 +30,6 @@ class CPU_Unpickler(pickle.Unpickler):
             return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
         else: return super().find_class(module, name)
 
-#contents = pickle.load(f) becomes...
-# contents = CPU_Unpickler(f).load()
 
 template_np, template_torch = field.read_template()
 template = cv2.imread('../data/template.png') 
@@ -63,55 +61,20 @@ def draw_points(img, bbox, pitch_template, h_frame, identities=None, offset=(0, 
             if len(players) >= 3:              
                 player.detectMainColors(players)
                 current_player.assignTeam(players)
-                # label = current_player.team
             current_player.updatePosition(int(x2-((x2-x1)/2)), int(y2))
         else:
-            # check color manually
-            # team, color = player.check_color_manual2(left_clicks,img,x1,x2,y1,y2)
-
-            # check color automatically
             color = player.detectPlayerColor(img,x1,x2,y1,y2)
-
             current_player = player.Player(id, isVisible=True, color=color, x=int(x2-((x2-x1)/2)), y=int(y2))
-
-            # label = "?"
             players[id] = current_player
 
-        # current_player.showInfo()
         plot_one_box(box, img, label=str(current_player.id), color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), line_thickness=1)
-        # print(current_player.color)
-        # print("i: " + str(i) + " ----- frame: " + str(frame) + " ----- player: " + str(current_player.id))
-        # cv2.circle(layer, (current_player.x,current_player.y), radius=5, color=(int(current_player.color[0]), int(current_player.color[1]), int(current_player.color[2])), thickness=-1)
-        # cv2.circle(pitch_template, (current_player.x,current_player.y), radius=5, color=current_player.color, thickness=-1)
-        # cv2.circle(pitch_template, (int(dst_x)*1000, int(dst_y)*1000), radius=5, color=current_player.color, thickness=-1)
-    # layer = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
+
     player.transformAllPositions(players, img.shape[0:2], h_frame, template_np.shape[0:2])
-    # print(np.transpose(np.nonzero(layer)))
-    # print(homography_list[frame].cpu().detach().numpy())
-    # pitch_template = field.show_top_down(pitch_template, img, homography_list[frame])
-    # pitch = field.torch_to_np(pitch_template)
-    # pitch = cv2.cvtColor(pitch, cv2.COLOR_RGB2BGR)
+
     
     player.drawAllPlayers(players, pitch_template)
-    # cv2.imshow('pitch', pitch_template)
-    # # print(img[frame])
-    # if cv2.waitKey(1) == ord('q'):  # q to quit
-    #     raise StopIteration
-    return img, pitch_template
 
-def pick_color(event,x,y,flags,param):
-    if event == cv2.EVENT_LBUTTONDOWN:
-        # colorsB = first_frame[y,x,0]
-        # colorsG = first_frame[y,x,1]
-        # colorsR = first_frame[y,x,2]
-        global left_clicks
-        colors = first_frame[y,x]
-        left_clicks.append(colors)
-        # print("Red: ",colorsR)
-        # print("Green: ",colorsG)
-        # print("Blue: ",colorsB)
-        # print("BRG Format: ",colors)
-        # print("Coordinates of pixel: X: ",x,"Y: ",y)
+    return img, pitch_template
 
 def detect(save_img=False):
     save_img, source, weights, view_img, save_txt, imgsz, homography = opt.save_img, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, opt.homography_file
@@ -119,7 +82,10 @@ def detect(save_img=False):
         ('rtsp://', 'rtmp://', 'http://'))
 
     homograpfy_file = open(homography, 'rb')
+    # if cpu is used
     homography_list = CPU_Unpickler(homograpfy_file).load()
+    # uncomment if gpu is used
+    # homography_list = pickle.load(homograpfy_file)
 
     # Directories
     if save_img:
@@ -168,18 +134,6 @@ def detect(save_img=False):
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
     _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
-
-    # global first_frame
-    # video = cv2.VideoCapture(source)
-    # status, first_frame = video.read()
-    # cv2.namedWindow('pick_color')
-    # cv2.setMouseCallback('pick_color',pick_color)
-    # while(1):
-    #     cv2.imshow('pick_color',first_frame)
-    #     if cv2.waitKey(20) & 0xFF == 27:
-    #         break
-    # cv2.destroyAllWindows()
-    # print(left_clicks)
 
     for path, img, im0s, vid_cap, frame in dataset:
         # if frame > 50:
@@ -266,35 +220,7 @@ def detect(save_img=False):
                             y_dst = player.denormalize(warpedPosition[1], template_np.shape[0:2][0])
                             positionOnTemplate = (x_dst, y_dst)
                             cv2.circle(pitch, (int(positionOnTemplate[0]),int(positionOnTemplate[1])), 5, (255,255,255), -1)
-                            # dst_x, dst_y = player.transformPosition(xywh[0]*1000, xywh[1]*1000, homography_list)
-                            # print(dst_x, dst_y)
-                            # cv2.circle(template, (int(dst_x)*5, int(dst_y)*8), radius=3, color=[0,0,0], thickness=-1)
-                        # print(xyxy)
-                        # x = xywh[:,1]
-                        # y = xywh[:,0]
-                        
-                        # print(x,y)
 
-                        # xy = torch.stack([x, y, torch.ones_like(x)])
-                        # xy_warped = torch.matmul(torch.inverse(homography_list[frame]), xy)
-
-                        # xy_warped, z_warped = xy_warped.split(2, dim=1)
-
-                        # xy_warped, z_warped = xy_warped.split(2, dim=1)
-                        # xy_warped = 2.0 * xy_warped / (z_warped + 1e-8)
-                        # x_warped, y_warped = torch.unbind(xy_warped, dim=1)
-                        # print(x_warped.squeeze(0).squeeze(0).numpy(), y_warped.squeeze(0).squeeze(0).numpy())
-                        # out_shape = template_torch.shape[1:3]
-                        # print(x_warped.view(*out_shape[-2:]))
-                        # x_np = x_warped.squeeze(0).squeeze(0).numpy()
-                        # y_np = y_warped.squeeze(0).squeeze(0).numpy()
-                        # print("x: "+str(x_np[0][0]))
-                        # print("y: "+str(y_np[0][0]))
-                        # dst = np.dot(torch.inverse(homography_list[frame]), xy)
-                        # dst = cv2.perspectiveTransform(xy, torch.inverse(homography_list[frame]))
-                        # dst_x, dst_y = player.transformPosition(xywh[0], xywh[1], homography_list[frame])
-                        # print("dst_xy: "+ str(dst))
-                        # cv2.circle(template_np, (int(x_np), int(x_np)), radius=4, color=[0,0,0], thickness=-1)
 
                     # Write MOT compliant results to file
                     """ if save_txt and len(outputs) != 0:
@@ -315,41 +241,14 @@ def detect(save_img=False):
                 # Print time (inference + NMS)
                 print(f'{s}Done. ({t2 - t1:.3f}s)')
 
-                # pitch_template = field.show_top_down(template_torch, im0, homography_list[frame])
-                # player.drawAllPlayers(players, template_np)
                 # Stream results
                 if view_img:
                     cv2.imshow(str(p), im0)
-                    # cv2.imshow(str(p), cv2.resize(im0, (int(im0.shape[1]/3), int(im0.shape[0]/3))))
-                    # pitch = cv2.cvtColor(template_np, cv2.COLOR_RGB2BGR)
                     cv2.imshow('pitch', pitch)
 
-                    # cv2.imshow('template', template_np)
                     if cv2.waitKey(1) == ord('q'):  # q to quit
                         raise StopIteration
-                
-                # layer = np.zeros((im0.shape[0], im0.shape[1], 3))
 
-                # for player in players:
-                #     x, y = players[player].getPosition()
-                #     color = players[player].getColor()
-                    # cv2.circle(template_np,(int(dst[0].item()),int(dst[1].item())) , 8, (50,255,0), -1)
-                    # cv2.circle(layer, (x,y), radius=5, color=color, thickness=-1)
-                    # print ("x: "+str(x)+ " y: "+str(y)+ " color: "+ str(color)+ " layer: "+str(layer))
-                
-                # top_down = field.show_top_down(template_torch, im0, homography_list[frame])
-                # layer = field.show_field(template_torch, im0, homography_list[frame])
-                # layer = cv2.cvtColor(layer, cv2.COLOR_RGB2BGR)
-                # for player_id in players:
-                #     x, y = players[player_id].getPosition()
-                #     cv2.circle(layer, (x,y), radius=5, color=(255,255,255), thickness=-1)
-
-                # layer = layer*0.5+im0
-                # cv2.imshow('layer', cv2.resize(layer, (int(layer.shape[1]/2), int(layer.shape[0]/2))))
-                # cv2.waitKey(1)
-                # cv2.imshow('top-down', top_down)
-                # cv2.waitKey(1)
-                # Save results (image with detections)
                 if save_img:
                     if dataset.mode == 'image':
                         cv2.imwrite(save_path, im0)
@@ -364,12 +263,9 @@ def detect(save_img=False):
                             h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                             vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
                             vid_writer2 = cv2.VideoWriter(str(save_dir / 'pitch.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), vid_cap.get(cv2.CAP_PROP_FPS), (int(pitch.shape[1]), int(pitch.shape[0])))
-                            # vid_writer3 = cv2.VideoWriter(str(save_dir / 'layer.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), vid_cap.get(cv2.CAP_PROP_FPS), (int(layer.shape[1]), int(layer.shape[0])))
-                            # vid_writer4 = cv2.VideoWriter(str(save_dir / 'warped.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), vid_cap.get(cv2.CAP_PROP_FPS), (int(top_down.shape[1]), int(top_down.shape[0])))
                         vid_writer.write(im0)
                         vid_writer2.write(pitch)
-                        # vid_writer3.write(layer)
-                        # vid_writer4.write(top_down)
+
 
 
     if save_txt or save_img:
@@ -382,7 +278,7 @@ def detect(save_img=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--save-img', action='store_true', help='save results')
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov5l.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='yolov5s.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='data/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
